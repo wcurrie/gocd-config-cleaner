@@ -1,4 +1,4 @@
-import java.io.{PrintWriter, FileWriter}
+import java.io.PrintWriter
 
 import scala.collection.mutable
 import scala.collection.mutable.ArrayBuffer
@@ -9,6 +9,7 @@ object Clean {
 
   val YourCompanyName = "replace-me-"
   val NameAttribute = """(name|pipelineName|pipeline)="([^"]+)"""".r.unanchored
+  val NameAndTemplateAttributes = """name="([^"]+)".*template="([^"]+)"""".r.unanchored
   val Url = """(ssh|http|https)://([^"<]+)""".r.unanchored
 
   val cleanNames = mutable.HashMap[String, String]()
@@ -24,25 +25,38 @@ object Clean {
     out.close()
 
     println(s"Used ${replacements.wordsUsed} words")
+
+    println("Mappings:")
+    cleanNames.foreach { case (original, safe) =>
+      println(s"$original -> $safe")
+    }
   }
 
   def clean(s: String) = (s match {
-    case line@NameAttribute(_, name) =>
-      val replacement = cleanNames.getOrElseUpdate(name, replacements.next())
-      replaceAttribute(line, name, replacement)
+    case line@NameAndTemplateAttributes(name, templateName) =>
+      line.replaceAttribute(name, safeNameFor(name))
+          .replaceAttribute(templateName, safeNameFor(templateName))
+    case line@NameAttribute(attributeName, name) if !line.contains("<stage ") && !line.contains("<job ") =>
+      line.replaceAttribute(name, safeNameFor(name))
     case line@Url(_, sensitive) if !line.startsWith("<cruise ") =>
       val replacement = cleanUrls.getOrElseUpdate(sensitive, replacements.next())
-      replaceUrl(line, sensitive, replacement)
+      line.replaceUrl(sensitive, replacement)
     case line => line
   }).replace(YourCompanyName, "acme-")
 
-  def replaceAttribute(line: String, original: String, clean: String): String = {
-    line.replace(s"""="$original"""", s"""="$clean"""")
+  def safeNameFor(sensitive: String): String = cleanNames.getOrElseUpdate(sensitive, replacements.next())
+
+  implicit class SpecialString(val line: String) extends AnyVal {
+
+    def replaceAttribute(original: String, clean: String): String = {
+      line.replace(s"""="$original"""", s"""="$clean"""")
+    }
+
+    def replaceUrl(original: String, clean: String): String = {
+      line.replace(s"""://$original""", s"""://$clean""")
+    }
   }
 
-  def replaceUrl(line: String, original: String, clean: String): String = {
-    line.replace(s"""://$original""", s"""://$clean""")
-  }
 }
 
 /**
